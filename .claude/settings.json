@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "c:\\Users\\kouta\\.claude\\projects\\c--Users-kouta-AndroidStudioProjects-20260426gt7-Kotlin-GT7-dash-board\\memory"
+    ],
+    "allow": [
+      "Read(//c/Users/kouta/.claude/projects/c--Users-kouta-AndroidStudioProjects-20260426gt7-Kotlin-GT7-dash-board/**)"
+    ]
+  }
+}
