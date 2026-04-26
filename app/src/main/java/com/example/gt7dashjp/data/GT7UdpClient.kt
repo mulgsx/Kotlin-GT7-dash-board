@@ -31,37 +31,53 @@ class GT7UdpClient(
         job = scope.launch {
             try {
                 DatagramSocket(receivePort).use { socket ->
-                    socket.soTimeout = 5000
-                    sendHeartbeat()
+                    // Short timeout so the loop can respond to cancellation promptly.
+                    // The heartbeat coroutine below is the sole keepalive mechanism.
+                    socket.soTimeout = 1000
+
+                    // Heartbeat: send "A" every 100 ms as required by the GT7 protocol.
+                    val heartbeatJob = launch {
+                        while (isActive) {
+                            sendHeartbeat()
+                            delay(100)
+                        }
+                    }
 
                     val buffer = ByteArray(4096)
                     var connected = false
-                    while (isActive) {
-                        try {
-                            val packet = DatagramPacket(buffer, buffer.size)
-                            socket.receive(packet)
 
-                            val rawData = packet.data.copyOf(packet.length)
-                            val decoded = decodeSalsa20(rawData)
+                    try {
+                        while (isActive) {
+                            try {
+                                val packet = DatagramPacket(buffer, buffer.size)
+                                socket.receive(packet)
 
-                            if (decoded.isNotEmpty()) {
-                                if (!connected) {
-                                    connected = true
-                                    val fromIp = packet.address.hostAddress ?: ip
-                                    withContext(Dispatchers.Main) { onConnected(fromIp) }
+                                // Protocol spec: minimum 68 bytes required for IV extraction.
+                                if (packet.length < 68) continue
+
+                                val rawData = packet.data.copyOf(packet.length)
+                                val decoded = decodeSalsa20(rawData)
+
+                                if (decoded.isNotEmpty()) {
+                                    if (!connected) {
+                                        connected = true
+                                        val fromIp = packet.address.hostAddress ?: ip
+                                        withContext(Dispatchers.Main) { onConnected(fromIp) }
+                                    }
+
+                                    // Offset 0x3C = RPM (see packet_structure.md)
+                                    val rpm = getFloat(decoded, 0x3C)
+                                    packetCount++
+                                    withContext(Dispatchers.Main) {
+                                        onPacketReceived(packetCount, rpm)
+                                    }
                                 }
-
-                                val rpm = getFloat(decoded, 0x1C)
-                                packetCount++
-                                withContext(Dispatchers.Main) { onPacketReceived(packetCount, rpm) }
-
-                                if (packetCount % 100 == 0) sendHeartbeat()
+                            } catch (e: SocketTimeoutException) {
+                                // Expected when no packet arrives within soTimeout — keep looping.
                             }
-
-                        } catch (e: SocketTimeoutException) {
-                            sendHeartbeat()
-                            withContext(Dispatchers.Main) { onStatus("Waiting for data...") }
                         }
+                    } finally {
+                        heartbeatJob.cancel()
                     }
                 }
             } catch (e: Exception) {
@@ -92,14 +108,15 @@ class GT7UdpClient(
     private fun decodeSalsa20(dat: ByteArray): ByteArray {
         try {
             val key = "Simulator Interface Packet GT7 ver 0.0".toByteArray().copyOf(32)
-            val oiv = dat.copyOfRange(0x40, 0x44)
-            val iv1 = ByteBuffer.wrap(oiv).order(ByteOrder.LITTLE_ENDIAN).int
-            val iv2 = iv1 xor 0xDEADBEAF.toInt()
+
+            // IV is derived from bytes [64:68] of the encrypted packet (gt7_protocol_reference.md §3.2)
+            val iv1 = ByteBuffer.wrap(dat, 0x40, 4).order(ByteOrder.LITTLE_ENDIAN).int
+            val iv2 = iv1 xor 0xDEADBEAF.toInt()   // note: BEAF not BEEF
 
             val iv = ByteArray(8)
             ByteBuffer.wrap(iv).order(ByteOrder.LITTLE_ENDIAN).apply {
-                putInt(iv2)
-                putInt(iv1)
+                putInt(iv2)   // [0:4] iv2 LE
+                putInt(iv1)   // [4:8] iv1 LE
             }
 
             val cipher = Salsa20Engine()
@@ -108,6 +125,7 @@ class GT7UdpClient(
             val decrypted = ByteArray(dat.size)
             cipher.processBytes(dat, 0, dat.size, decrypted, 0)
 
+            // Magic 0x47375330 ("GT70") must be at offset 0x00 of the decrypted packet.
             val magic = ByteBuffer.wrap(decrypted, 0, 4).order(ByteOrder.LITTLE_ENDIAN).int
             return if (magic == 0x47375330) decrypted else ByteArray(0)
         } catch (e: Exception) {
