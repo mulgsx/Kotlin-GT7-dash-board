@@ -1,10 +1,17 @@
 package com.example.gt7dashjp.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -13,6 +20,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.gt7dashjp.ui.theme.StatusConnecting
+import com.example.gt7dashjp.ui.theme.StatusError
+import com.example.gt7dashjp.ui.theme.StatusIdle
+import com.example.gt7dashjp.ui.theme.StatusReceiving
 import com.example.gt7dashjp.viewmodel.StatusType
 import com.example.gt7dashjp.viewmodel.TelemetryUiState
 
@@ -29,14 +40,20 @@ fun GT7Drawer(
     val borderColor = if (dark) Color(0x26FFFFFF) else Color(0x1F000000)
     val inputBg    = if (dark) Color(0xFF2C2C2E) else Color.White
     val subText    = if (dark) Color(0x80FFFFFF) else Color(0x73000000)
-    val accentGreen = Color(0xFF4CAF50)
-    val stopRed     = Color(0xFFFF3B30)
+    val pulseAlpha = remember { Animatable(0.3f) }
+
+    LaunchedEffect(uiState.packetCount) {
+        pulseAlpha.animateTo(1f, tween(180))
+        pulseAlpha.animateTo(0.3f, tween(320))
+    }
 
     ModalDrawerSheet(
         drawerShape = RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp),
         drawerContainerColor = drawerBg,
         modifier = Modifier.width(300.dp)
     ) {
+      // セーフエリアを追加 / Add SafeArea
+      Column(modifier = Modifier.safeDrawingPadding()) {
         // Header
         Column(
             modifier = Modifier
@@ -44,7 +61,7 @@ fun GT7Drawer(
                 .padding(top = 32.dp, start = 20.dp, end = 20.dp, bottom = 18.dp)
         ) {
             Text(
-                text = "GT7 Dashboard Settings",
+                text = "Menu",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
                 color = textColor,
@@ -67,6 +84,7 @@ fun GT7Drawer(
                     onIpChanged(input.filter { it.isDigit() || it == '.' })
                 },
                 label = { Text("PS5 IP Address", fontSize = 11.sp) },
+                placeholder = { Text("ex: 192.168.0.50") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 textStyle = TextStyle(
@@ -90,9 +108,9 @@ fun GT7Drawer(
             // Start / Stop Button
             Button(
                 onClick = if (uiState.isListening) onStopClicked else onStartClicked,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (uiState.isListening) stopRed else accentGreen
+                    containerColor = if (uiState.isListening) StatusError else StatusReceiving
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -100,31 +118,48 @@ fun GT7Drawer(
             ) {
                 Text(
                     text = if (uiState.isListening) "Stop Receiving" else "Start Receiving",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = (-0.3).sp
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
                 )
             }
 
-            // Status Info
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "Packets: ${uiState.packetCount}",
-                    fontSize = 14.sp,
-                    color = textColor
+            // Pulse indicator + packet rate
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(
+                            StatusReceiving.copy(alpha = pulseAlpha.value),
+                            CircleShape
+                        )
                 )
-                val statusColor = when (uiState.statusType) {
-                    StatusType.RECEIVING  -> accentGreen
-                    StatusType.CONNECTING -> Color(0xFFE65100)
-                    StatusType.IDLE, StatusType.ERROR -> stopRed
-                }
                 Text(
-                    text = uiState.status,
+                    text = "%.1f Hz".format(uiState.packetRate),
                     fontSize = 14.sp,
-                    color = statusColor,
-                    lineHeight = 21.sp
+                    color = StatusReceiving
                 )
             }
+
+            HorizontalDivider(color = borderColor, thickness = 1.dp)
+
+            // Status row
+            val statusColor = when (uiState.statusType) {
+                StatusType.RECEIVING  -> StatusReceiving
+                StatusType.ERROR      -> StatusError
+                StatusType.CONNECTING -> StatusConnecting
+                StatusType.IDLE       -> StatusIdle
+            }
+            Text(
+                text = "Status: ${uiState.status}",
+                fontSize = 14.sp,
+                color = statusColor,
+                lineHeight = 21.sp
+            )
         }
+      }
     }
 }

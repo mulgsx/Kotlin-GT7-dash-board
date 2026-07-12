@@ -11,8 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-
-private const val DEFAULT_IP = "192.168.0.0"
+import java.util.concurrent.ConcurrentLinkedDeque
 
 enum class StatusType { IDLE, CONNECTING, RECEIVING, ERROR }
 
@@ -20,16 +19,17 @@ data class TelemetryUiState(
     val isListening: Boolean = false,
     val rpm: Float = 0f,
     val packetCount: Int = 0,
+    val packetRate: Float = 0f,
     val status: String = "IDLE: Press 'Start Receiving' to connect",
     val statusType: StatusType = StatusType.IDLE,
-    val currentIp: String = DEFAULT_IP,
-    val ipFieldText: String = DEFAULT_IP
+    val currentIp: String = TelemetryViewModel.DEFAULT_IP,
+    val ipFieldText: String = TelemetryViewModel.DEFAULT_IP
 )
 
 class TelemetryViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
-        const val DEFAULT_IP = "192.168.0.0"
+        const val DEFAULT_IP = "192.168.0.100"
         private const val PREFS_NAME = "gt7_prefs"
         private const val PREFS_KEY_IP = "gt7_ps_ip"
     }
@@ -45,9 +45,11 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
 
     private var client: GT7UdpClient? = null
     private var pollingJob: Job? = null
+    private val packetTimestamps = ConcurrentLinkedDeque<Long>()
 
     @Volatile private var latestPacketCount: Int = 0
     @Volatile private var latestRpm: Float = 0f
+    @Volatile private var latestPacketRate: Float = 0f
 
     fun onIpChanged(ip: String) {
         _uiState.value = _uiState.value.copy(ipFieldText = ip)
@@ -66,6 +68,8 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
         client?.stopCommunication()
         latestPacketCount = 0
         latestRpm = 0f
+        latestPacketRate = 0f
+        packetTimestamps.clear()
 
         _uiState.value = _uiState.value.copy(
             isListening = true,
@@ -86,6 +90,7 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
             onPacketReceived = { count, rpm ->
                 latestPacketCount = count
                 latestRpm = rpm
+                packetTimestamps.addLast(System.currentTimeMillis())
             },
             onError = { message ->
                 pollingJob?.cancel()
@@ -102,9 +107,15 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
         pollingJob = viewModelScope.launch {
             while (true) {
                 delay(200)
+                val now = System.currentTimeMillis()
+                while (packetTimestamps.isNotEmpty() && now - packetTimestamps.peekFirst() >= 1000) {
+                    packetTimestamps.removeFirst()
+                }
+                latestPacketRate = packetTimestamps.size.toFloat()
                 _uiState.value = _uiState.value.copy(
                     packetCount = latestPacketCount,
-                    rpm = latestRpm
+                    rpm = latestRpm,
+                    packetRate = latestPacketRate
                 )
             }
         }
@@ -120,7 +131,8 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
             statusType = StatusType.IDLE,
             status = "IDLE: Press 'Start Receiving' to connect",
             packetCount = 0,
-            rpm = 0f
+            rpm = 0f,
+            packetRate = 0f
         )
     }
 

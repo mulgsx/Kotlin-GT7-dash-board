@@ -66,7 +66,7 @@ class GT7UdpClient(
                                     }
 
                                     // Offset 0x3C = RPM (see packet_structure.md)
-                                    val rpm = getFloat(decoded, 0x3C)
+                                    val rpm = parsePacket(decoded)
                                     packetCount++
                                     withContext(Dispatchers.Main) {
                                         onPacketReceived(packetCount, rpm)
@@ -105,7 +105,7 @@ class GT7UdpClient(
         }
     }
 
-    private fun decodeSalsa20(dat: ByteArray): ByteArray {
+    internal fun decodeSalsa20(dat: ByteArray): ByteArray {
         try {
             val key = "Simulator Interface Packet GT7 ver 0.0".toByteArray().copyOf(32)
 
@@ -134,9 +134,9 @@ class GT7UdpClient(
         }
     }
 
-    private fun getFloat(decoded: ByteArray, offset: Int): Float {
-        return if (decoded.size >= offset + 4) {
-            ByteBuffer.wrap(decoded, offset, 4).order(ByteOrder.LITTLE_ENDIAN).float
+    internal fun parsePacket(decoded: ByteArray): Float {
+        return if (decoded.size >= 0x3C + 4) {
+            ByteBuffer.wrap(decoded, 0x3C, 4).order(ByteOrder.LITTLE_ENDIAN).float
         } else 0f
     }
 }

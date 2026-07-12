@@ -68,6 +68,7 @@ fun DashboardScreen(viewModel: TelemetryViewModel) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(bg)
+                .safeDrawingPadding()
         ) {
             // App Bar
             Column(
